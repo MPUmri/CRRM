@@ -1,4 +1,4 @@
-# CRRRM
+# CRRM
 
 ## Introduction
 
