@@ -1,6 +1,7 @@
 % Result collector. This script:
 % - reads in raw results from e01_2a_simProcessLLSQ.m & e01_2b_simProcessNLSQ.m
 % - calculates summary statistics
+% - saves summary as .csv
 
 % Runtime: ~2 seconds
 
@@ -14,8 +15,11 @@ refName = 'refY';
 % Choices are: 'refY', 'refWS', 'refP'
 % Refer to './mfiles/SimProperties.m for further details
 
+% Name of the csv file which will contain the summary results
+csvName = ['e01-simResults-' refName '.csv'];
+
 % This controls which kind of models/approaches should be summarized
-methodList = {'LRRM','CLRRM','NRRM'};
+methodList = {'LRRM','CLRRM','CHRRM','CLRRMm','CLRRMt','NRRM'};
 % Choices can include: 'LRRM', 'CLRRM', 'CLRRMn', 'CLRRMm', 'CLRRMt', 'NRRM'
 % Refer to e01_2_simProcessLLSQ.m for details
 
@@ -26,9 +30,9 @@ methodList = {'LRRM','CLRRM','NRRM'};
 simProp = SimProperties(refName);
 
 % Copy variables to make code less verbose
-listCNR = [5]; % Range of Contrast-Noise Ratio to simulate
+listCNR = simProp.CNR; % Range of Contrast-Noise Ratio to simulate
 nVox = simProp.nVox; % Number of replications for each CNR
-listTRes = [10]; % Temporal resolutions (in seconds)
+listTRes = simProp.TRes; % Temporal resolutions (in seconds)
 tDuration = simProp.tDuration; % Duration of DCE Acquisition (in minutes)
 
 % Pharmacokinetics of reference tissue
@@ -49,6 +53,12 @@ relVe = ve/veRR;
 
 dirLocation = DefaultFolders();
 dataDir = fullfile(dirLocation.sim,simProp.name);
+outFile = fullfile(dirLocation.results,csvName);
+
+% Create folder for csv output (if it doesn't exist)
+if ~exist(dirLocation.results)
+    mkdir(dirLocation.results)
+end
 
 % Check for inconsistencies
 % This is a crude check that only makes sure that the results folder exist
@@ -58,20 +68,27 @@ if (strmatch('LRRM',methodList) & ~exist(fullfile(dataDir,'LRRM')));
     error('Results for LRRM not found');
 end
 if (strmatch('CLRRM',methodList) & ~exist(fullfile(dataDir,'CLRRM')));
-    error('Results for LRRM not found');
+    error('Results for CLRRM not found');
+end
+if (strmatch('CHRRM',methodList) & ~exist(fullfile(dataDir,'CHRRM')));
+    error('Results for CHRRM not found');
 end
 if (strmatch('CLRRMm',methodList) & ~exist(fullfile(dataDir,'CLRRMm')));
-    error('Results for LRRM not found');
-end
-if (strmatch('CLRRMn',methodList) & ~exist(fullfile(dataDir,'CLRRMn')));
-    error('Results for LRRM not found');
+    error('Results for CLRRMm not found');
 end
 if (strmatch('CLRRMt',methodList) & ~exist(fullfile(dataDir,'CLRRMt')));
-    error('Results for LRRM not found');
+    error('Results for CLRRMt not found');
 end
 if (strmatch('NRRM',methodList) & ~exist(fullfile(dataDir,'NRRM')));
     error('Results for NRRM not found');
 end
+
+%% Initialize output CSV file
+
+% The CSV header
+hdr=['FitMethod,CNR,TemporalRes,TrueRelKt,TrueRelVe,TrueKep,errKt,errVe,errKep,stdErrKt,stdErrVe,stdErrKep, meanResid, stdResid'];
+outID = fopen(outFile, 'w+');
+fprintf(outID, '%s\n', hdr); % Print header into csv file
 
 %% Analyze the simulation data
 tic
@@ -89,104 +106,83 @@ for indCNR = 1:length(listCNR)
             load(fullfile(dataDir,curM,curFile));
             if strcmp(curM,'LRRM')
                 % Calculate percent error for relative KTrans, relative EES and kep
-                [ktErrsLL, meanKtErrLL, stdKtErrLL] = PercentError(pkParamsLL(:,1),relKt);
-                [veErrsLL, meanVeErrLL, stdVeErrLL] = PercentError(pkParamsLL(:,2),relVe);
-                [kepErrsLL, meanKepErrLL, stdKepErrLL] = PercentError(pkParamsLL(:,3),kep);
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsLL(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsLL(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsLL(:,3),kep);
                 % Note down the mean and standard deviation of residual too
-                meanResidLL = mean(residLL(:));
-                stdResidLL = std(residLL(:));
+                meanResid = mean(residLL(:));
+                stdResid = std(residLL(:));
                 % Output the mean and stdDeviation to CSV file...
+                outLine = {'LRRM',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
             elseif strcmp(curM,'CLRRM')
-                [ktErrsCL, meanKtErrCL, stdKtErrCL] = PercentError(pkParamsCL(:,1),relKt);
-                [veErrsCL, meanVeErrCL, stdVeErrCL] = PercentError(pkParamsCL(:,2),relVe);
-                [kepErrsCL, meanKepErrCL, stdKepErrCL] = PercentError(pkParamsCL(:,3),kep);
-                meanResidCL = mean(residCL(:));
-                stdResidCL = std(residCL(:));
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsCL(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsCL(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsCL(:,3),kep);
+                meanResid = mean(residCL(:));
+                stdResid = std(residCL(:));
+                outLine = {'CLRRM',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
             elseif strcmp(curM,'CLRRMm')
-                [ktErrsCLm, meanKtErrCLm, stdKtErrCLm] = PercentError(pkParamsCLm(:,1),relKt);
-                [veErrsCLm, meanVeErrCLm, stdVeErrCLm] = PercentError(pkParamsCLm(:,2),relVe);
-                [kepErrsCLm, meanKepErrCLm, stdKepErrCLm] = PercentError(pkParamsCLm(:,3),kep);
-                meanResidCLm = mean(residCLm(:));
-                stdResidCLm = std(residCLm(:));
-            elseif strcmp(curM,'CLRRMn')
-                [ktErrsCLn, meanKtErrCLn, stdKtErrCLn] = PercentError(pkParamsCLn(:,1),relKt);
-                [veErrsCLn, meanVeErrCLn, stdVeErrCLn] = PercentError(pkParamsCLn(:,2),relVe);
-                [kepErrsCLn, meanKepErrCLn, stdKepErrCLn] = PercentError(pkParamsCLn(:,3),kep);
-                meanResidCLn = mean(residCLn(:));
-                stdResidCLn = std(residCLn(:));
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsCLm(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsCLm(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsCLm(:,3),kep);
+                meanResid = mean(residCLm(:));
+                stdResid = std(residCLm(:));
+                outLine = {'CLRRMm',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
+            elseif strcmp(curM,'CHRRM')
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsCH(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsCH(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsCH(:,3),kep);
+                meanResid = mean(residCH(:));
+                stdResid = std(residCH(:));
+                outLine = {'CHRRM',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
             elseif strcmp(curM,'CLRRMt')
-                [ktErrsCLt, meanKtErrCLt, stdKtErrCLt] = PercentError(pkParamsCLt(:,1),relKt);
-                [veErrsCLt, meanVeErrCLt, stdVeErrCLt] = PercentError(pkParamsCLt(:,2),relVe);
-                [kepErrsCLt, meanKepErrCLt, stdKepErrCLt] = PercentError(pkParamsCLt(:,3),kep);
-                meanResidCLt = mean(residCLt(:));
-                stdResidCLt = std(residCLt(:));
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsCLt(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsCLt(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsCLt(:,3),kep);
+                meanResid = mean(residCLt(:));
+                stdResid = std(residCLt(:));
+                outLine = {'CLRRMt',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
             elseif strcmp(curM,'NRRM')
                 % This option contains NRRM and CNRRM
                 pkParamsN = pkParamsN';
                 pkParamsCN = pkParamsCN';
                 % Do NRRM first
-                [ktErrsNL, meanKtErrNL, stdKtErrNL] = PercentError(pkParamsN(:,1),relKt);
-                [veErrsNL, meanVeErrNL, stdVeErrNL] = PercentError(pkParamsN(:,2),relVe);
-                [kepErrsNL, meanKepErrNL, stdKepErrNL] = PercentError(pkParamsN(:,3),kep);
-                meanResidNL = mean(residN(:));
-                stdResidNL = std(residN(:));
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsN(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsN(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsN(:,3),kep);
+                meanResid = mean(residN(:));
+                stdResid = std(residN(:));
+                outLine = {'NRRM',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
                 % Then do CNRRM
-                [ktErrsCN, meanKtErrCN, stdKtErrCN] = PercentError(pkParamsCN(:,1),relKt);
-                [veErrsCN, meanVeErrCN, stdVeErrCN] = PercentError(pkParamsCN(:,2),relVe);
-                [kepErrsCN, meanKepErrCN, stdKepErrCN] = PercentError(pkParamsCN(:,3),kep);
-                meanResidCN = mean(residCN(:));
-                stdResidCN = std(residCN(:));
+                [ktErrs, meanKtErr, stdKtErr] = PercentError(pkParamsCN(:,1),relKt);
+                [veErrs, meanVeErr, stdVeErr] = PercentError(pkParamsCN(:,2),relVe);
+                [kepErrs, meanKepErr, stdKepErr] = PercentError(pkParamsCN(:,3),kep);
+                meanResid = mean(residCN(:));
+                stdResid = std(residCN(:));
+                outLine = {'CNRRM',curCNR,curTRes,relKt,relVe,kep,meanKtErr,meanVeErr,...
+                    meanKepErr,stdKtErr,stdVeErr,stdKepErr,meanResid,stdResid};
+                fprintf(outID,'%s,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n', outLine{:});
             end
         end
     end
 end
 toc
+fclose(outID); % Close the CSV file
+fclose('all') % Close everything, for safety incase the previous line doesn't do it
 disp('.')
 disp('.')
 disp('.')
 disp('Done summarizing simulation data')
-
-%%
-if exist('ktErrsNL','var')
-    xLabels = {'NRRM','CNRRM','LRRM','CLRRM'};
-    %%
-    figure
-    boxplot([ktErrsNL ktErrsCN ktErrsLL ktErrsCL])
-    set(gca,'XTick',[1:4], 'XTickLabel',xLabels)
-    ylabel('Percent error in K^{Trans}')
-    title(['Percent error in K^{Trans}'])
-    %%
-    figure
-    boxplot([kepErrsNL kepErrsCN kepErrsLL kepErrsCL])
-    set(gca,'XTick',[1:4], 'XTickLabel',xLabels)
-    ylabel('Percent error in k_{ep}')
-    title(['Percent error in k_{ep}'])
-    %%
-    figure
-    boxplot([veErrsNL veErrsCN veErrsLL veErrsCL])
-    set(gca,'XTick',[1:4], 'XTickLabel',xLabels)
-    ylabel('Percent error in v_e')
-    title(['Percent error in v_e'])
-    ylim([-200 200])
-else
-    xLabels = {'LRRM','CLRRM'};
-    %%
-    figure
-    boxplot([ktErrsLL ktErrsCL])
-    set(gca,'XTick',[1:2], 'XTickLabel',xLabels)
-    ylabel('Percent error in K^{Trans}')
-    title(['Percent error in K^{Trans}'])
-    %%
-    figure
-    boxplot([kepErrsLL kepErrsCL])
-    set(gca,'XTick',[1:2], 'XTickLabel',xLabels)
-    ylabel('Percent error in k_{ep}')
-    title(['Percent error in k_{ep}'])
-    %%
-    figure
-    boxplot([veErrsLL veErrsCL])
-    set(gca,'XTick',[1:2], 'XTickLabel',xLabels)
-    ylabel('Percent error in v_e')
-    title(['Percent error in v_e'])
-    ylim([-200 200])
-end
+disp(['Summary saved in: ' outFile]);

@@ -1,9 +1,17 @@
 % Simulation Analyzer. This script:
 % - reads in data made by Simulation Maker (e01_1_simMaker.m)
-% - fits data using LRRM and CLRRM
+% - fits data using LRRM and variants of CRRM
 % - saves results as .mat
 
-% Estimated runtime: ~4 s
+% Total Runtimes:
+% ~30 seconds for LRRM
+% ~55 seconds for CLRRM
+% ~30 seconds for CHRRM
+% ~55 seconds for CLRRMm
+% ~30 seconds for CLRRMt
+% The actual run time will depend on which method(s) are entered in the
+% variable 'methodList'
+% If all variants are used, then total run time ~185 seconds
 
 %% General setup
 clearvars
@@ -16,18 +24,16 @@ refName = 'refY';
 % Refer to './mfiles/SimProperties.m for further details
 
 % This controls which models/approaches will be attemped
-methodList = {'LRRM','CLRRM'};
+methodList = {'LRRM','CLRRM','CHRRM','CLRRMm','CLRRMt'};
 % Choices can include: 'LRRM', 'CLRRM', 'CLRRMn', 'CLRRMm', 'CLRRMt'
 % Description:
 % LRRM : Linear Reference Region Model (LRRM)
 %       [Cardenas-Rodriguez et al. (2013) MRI, 31(4), 497-507.doi:10.1016/j.mri.2012.10.008]
-% CLRRM : Contrained LRRM using interquartile mean to estimate kepRR (paper version)
-% CLRRMn : Constrained LRRM using interquartile mean from non-linear estimates of kepRR
+% CLRRM : Contrained LRRM using median to estimate kepRR (paper version)
 % CLRRMm : Constrained LRRM using mean over all voxels to estimate kepRR (crude method)
+% CHRRM : Constrained Hybrid RRM using interquartile mean from non-linear estimates of kepRR
+%         Requires e01_2a to be succesfully run before running this script.
 % CLRRMt : Contrained LRRM using true value of kepRR (assuming kepRef was known a-priori)
-
-% The paper only compared LRRM and CLRRM, so only those two are included in
-% 'methodList', but the other methods can be added if the user is curious.
 
 % End of setup
 
@@ -36,9 +42,9 @@ methodList = {'LRRM','CLRRM'};
 simProp = SimProperties(refName);
 
 % Copy variables to make code less verbose
-listCNR = [5]; % Range of Contrast-Noise Ratio to simulate
+listCNR = simProp.CNR; % Range of Contrast-Noise Ratio to simulate
 nVox = simProp.nVox; % Number of replications for each CNR
-listTRes = [10]; % Temporal resolutions (in seconds)
+listTRes = simProp.TRes; % Temporal resolutions (in seconds)
 tDuration = simProp.tDuration; % Duration of DCE Acquisition (in minutes)
 
 % Pharmacokinetics of reference tissue
@@ -74,11 +80,11 @@ end
 if (strmatch('CLRRM',methodList) & ~exist(fullfile(outDir,'CLRRM')));
     mkdir(fullfile(outDir,'CLRRM'));
 end
+if (strmatch('CHRRM',methodList) & ~exist(fullfile(outDir,'CHRRM')));
+    mkdir(fullfile(outDir,'CHRRM'));
+end
 if (strmatch('CLRRMm',methodList) & ~exist(fullfile(outDir,'CLRRMm')));
     mkdir(fullfile(outDir,'CLRRMm'));
-end
-if (strmatch('CLRRMn',methodList) & ~exist(fullfile(outDir,'CLRRMn')));
-    mkdir(fullfile(outDir,'CLRRMn'));
 end
 if (strmatch('CLRRMt',methodList) & ~exist(fullfile(outDir,'CLRRMt')));
     mkdir(fullfile(outDir,'CLRRMt'));
@@ -113,28 +119,29 @@ for indCNR = 1:length(listCNR)
                 save(outFile, 'pkParamsLL', 'residLL','runtimeLL');
             elseif strcmp(curM,'CLRRM')
                 % The Contrained Linear Reference Region Model
-                % - using interquartile mean for kepRef estimate [paper's method]
+                % - using median from LRRM for kepRef estimate [paper's method]
                 tic;
-                [pkParamsCL, residCL, meanKepRRCL, stdKepRRCL, pkParamsLLRaw] = CLRRM(Ct, Crr, t, -1);
+                [pkParamsCL, residCL, estKepRRCL, stdKepRRCL, pkParamsLLRaw] = CLRRM(Ct, Crr, t);
                 runtimeCL=toc;
                 outFile = fullfile(outDir, 'CLRRM', curFile);
-                save(outFile, 'pkParamsCL', 'residCL','runtimeCL', 'meanKepRRCL', 'stdKepRRCL', 'pkParamsLLRaw');
+                save(outFile, 'pkParamsCL', 'residCL','runtimeCL', 'estKepRRCL', 'stdKepRRCL', 'pkParamsLLRaw');
             elseif strcmp(curM,'CLRRMm')
                 % The Contrained Linear Reference Region Model
-                % - using mean from all voxels for kepRef estimate
-                [pkParamsCLm, residCLm, meanKepRRCLm, stdKepRRCLm] = CLRRM(Ct, Crr, t, 0);
+                % - using mean from LRRM for all voxels for kepRef estimate
+                [pkParamsCLm, residCLm, estKepRRCLm, stdKepRRCLm] = CLRRM(Ct, Crr, t, -1);
                 outFile = fullfile(outDir, 'CLRRMm', curFile);
-                save(outFile, 'pkParamsCLm', 'residCLm', 'meanKepRRCLm', 'stdKepRRCLm');
-            elseif strcmp(curM,'CLRRMn')
+                save(outFile, 'pkParamsCLm', 'residCLm', 'estKepRRCLm', 'stdKepRRCLm');
+            elseif strcmp(curM,'CHRRM')
                 % The Contrained Linear Reference Region Model
                 % - using estimates from the NRRM to get kepRR
                 nrrmFile = fullfile(outDir,'NRRM',curFile);
-                load(nrrmFile); % This file contains 'meanKepRR' from NRRM
+                load(nrrmFile); % This file contains 'medianKepRR' from NRRM
                 tic;
-                [pkParamsCLn, residCLn] = CLRRM(Ct, Crr, t, meanKepRR);
-                runtimeCLn = toc;
-                outFile = fullfile(outDir, 'CLRRMn', curFile);
-                save(outFile, 'pkParamsCLn', 'residCLn', 'runtimeCLn');
+                [pkParamsCH, residCH] = CLRRM(Ct, Crr, t, medianKepRR);
+                runtimeCH = toc;
+                estKepRRCH = medianKepRR;
+                outFile = fullfile(outDir, 'CHRRM', curFile);
+                save(outFile, 'pkParamsCH', 'residCH', 'runtimeCH', 'estKepRRCH');
             elseif strcmp(curM,'CLRRMt')
                 % The Contrained Linear Reference Region Model
                 % - when the true kepRef value is known a-priori

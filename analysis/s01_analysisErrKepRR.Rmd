@@ -1,0 +1,128 @@
+---
+title: "Results from e01_x_simAnalyzerStatic.m"
+runtime: shiny
+---
+
+# Quick info
+
+- 10,000 replications at CNR range 5:5:50
+- TemporalResolutions: 1s, 5s, 10s, 15s, 30s, 60s
+- Using the literature-based/population-averaged AIF from Parker et al.
+- Reference region kinetics:
+    + KTrans_RR = 0.1 /min
+    + ve,RR = 0.1
+    + kep,RR = 1.0 /min
+- Tumour kinetics:
+    + KTrans = 0.25 /min
+    + ve = 0.4
+    + kep = 0.625 /min
+- The CLRRM was used using arbitrarily fixed kep,RR values ranging from 0.5 to 1.5
+    + The true value is 1.0
+    + The goal is to see how error in kep,RR affects errors in KTrans, ve, and kep
+
+```{r, echo=FALSE, warning=FALSE}
+## Required libraries from CRAN
+library(shiny)
+library(ggplot2)
+library(Cairo)
+library(knitr)
+#library(stringr) 
+#library(rCharts)
+options(shiny.usecairo=T)
+
+csvFile = "..\\dataResults\\e01-simResultsStatic-refY.csv"
+
+## Load data
+csvData <- read.csv(csvFile)
+csvData$FitMethod <- as.factor('CLRRM')
+#csvDataA <- subset(csvDataA, FitMethod %in% c('CLRRM','CNRRM'))
+#csvDataB <- read.csv(csvB)
+#csvDataA <- rbind(csvDataA, csvDataB)
+CNRChoices <- unique(csvData$CNR)
+TResChoices <- unique(csvData$TemporalRes)
+modelChoices <- levels(csvData$FitMethod)
+parameterChoices <- c('KTrans','ve', 'kep','resNorm')
+
+shinyApp(
+  ui = fluidPage(
+    titlePanel("Parameter Estimates - Reference Region Models"),
+    sidebarLayout(
+      sidebarPanel(
+        uiOutput("selectModel"),
+        selectInput("plotVarA", label = "Parameter of Interest",
+                    choices=parameterChoices),
+        selectInput("cnrChoice", label = "CNR of Interest",
+                    choices=CNRChoices),
+        selectInput("TResA", label = "Temporal Resolution",
+                    choices=TResChoices)
+      ),
+      mainPanel(
+        plotOutput("mainPlot")
+      )
+    )
+  ),
+  
+  server = function(input, output) {
+    
+    output$selectModel <- renderUI({
+	    selectInput("selectedModels", "Select Model/Method(s):",
+		  modelChoices,
+		  selected=modelChoices[1],multiple=TRUE)
+	  })
+
+    
+    localData <- reactive({
+      #subData <- subset(csvDataA, CNR == input$CNRA)
+      subData <- subset(csvData, TemporalRes == input$TResA)
+      subData <- subset(subData, CNR == input$cnrChoice)
+      return(subData)
+    })
+    
+    output$mainPlot <- renderPlot({
+      if (input$plotVarA == 'KTrans') {
+        highTable <- data.frame(x = localData()$KepRef,
+                                y = localData()$errKt,
+                                std = localData()$stdErrKt,
+                                fGroup = localData()$FitMethod)
+        curX <- 'EstKepRR'
+        curY <- 'Percent Error in KTrans'
+        curTitle <- paste('Percent error in KTrans when CNR =', input$cnrChoice, 'Temporal Res =', input$TResA)
+        
+      } else if (input$plotVarA == 've') {
+        highTable <- data.frame(x = localData()$KepRef,
+                                y = localData()$errVe,
+                                #To show ErrorBars for Ve, change next line to: std = localData()$stdErrVe,
+                                std = 0,
+                                fGroup = localData()$FitMethod)
+        curX <- 'EstKepRR'
+        curY <- 'Percent Error in Ve'
+        curTitle <- paste('Percent error in ve when CNR =', input$cnrChoice, 'Temporal Res =', input$TResA)
+      } else if (input$plotVarA == 'kep') {
+        highTable <- data.frame(x = localData()$KepRef,
+                                y = localData()$errKep,
+                                std = localData()$stdErrKep,
+                                fGroup = localData()$FitMethod)
+        curX <- 'EstKepRR'
+        curY <- 'Percent Error in Kep'
+        curTitle <- paste('Percent error in kep when CNR =', input$cnrChoice, 'Temporal Res =', input$TResA)
+      } else if (input$plotVarA == 'resNorm') {
+        highTable <- data.frame(x = localData()$KepRef,
+                                y = localData()$meanResid,
+                                std = localData()$stdResid,
+                                fGroup = localData()$FitMethod)
+        curX <- 'EstKepRR'
+        curY <- 'Residual'
+        curTitle <- paste('Mean residual when CNR =', input$cnrChoice, 'Temporal Res =', input$TResA)
+      }
+      limits <- aes(ymax = y + std, ymin=y - std)
+      p <- ggplot(highTable, aes(y=y, x=x, colour=fGroup)) + geom_line(size=1) + 
+        geom_errorbar(limits, width=0.05, size=1) +
+        xlab(curX) + ylab(curY) + ggtitle(curTitle)
+      return(p)
+    })
+    
+  },
+  
+  options = list(height = 600)
+)
+```

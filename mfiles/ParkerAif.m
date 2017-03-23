@@ -1,8 +1,11 @@
 function theAif = ParkerAif(t, t0)
-% Quick script for generating a population-based AIF...
-% ...from Parker. MR in Medicine 56:993-1000 (2006)
+% Generates an AIF using the model and parameters from:
+% Parker et al. (2006) MRM, 56(5), 993-1000. doi:10.1002/mrm.21066
+% Inputs:
+%     t: [vector] time, in minutes, for each DCE frame
+%     t0: [real value] time of injection, in minutes
 
-    Hct = 0.42; % Common estimate for Hct
+    Hct = 0.42; % Common estimate for hematocritc from paper
 
     if nargin < 1
         t=0:499;
@@ -12,10 +15,11 @@ function theAif = ParkerAif(t, t0)
         t0 = 0;
     end
 
+    % Set all pre-injection time points to zero
     t = t-t0;
     t(t<0) = 0;
 
-    % %% Population-averaged parameters from Parker
+    % Population-averaged parameters from Parker et al. Paper
     A(1) = 0.809;
     A(2) = 0.330;
     T(1) = 0.17046;
@@ -33,8 +37,7 @@ function theAif = ParkerAif(t, t0)
         + Alpha * exp(-Beta*t) ./ (1+ exp(-s*(t-Tau)));
 
     % C_b is the concentration in the whole blood
-    % Most models use the concentration in the blood plasma C_p
-    % C_b can be converted to C_p by using hematocrit
+    % Take hematocrit into account to get concentration in plasma (i.e. C_p)
     theAif = C_b / (1-Hct);
-    theAif(t<=0)=0;
+    theAif(t<=0)=0; % Ensure concentration is zero for all pre-injection time points
 end

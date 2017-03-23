@@ -1,59 +1,67 @@
 function [pkParams, resid, estKepRR, stdKepRR, p] = CLRRM(Ct, Crr, t, kepRef)
-  % Constrained Linear Reference Region fit
-  % Inputs:
-  % Ct - TxN Matrix where T is time and N is number of voxels
-  %    - Concentration-time curve in tissue of interest
-  % Crr - Tx1
-  %     - Concentration-time curve in reference tissue
-  % t  - Tx1
-  %    - time, in minutes
-  % kepRef - numeric value
-  % If kepRef > 0, then this value will be used as kepRef
-  %           = 0, then mean will be used as kepRef
-  %           = -1, then interquartile mean will be used as kepRef
-  %
-  % Outputs:
-  % pkParams - Nx3 matrix, [Ktrans/Ktrans_RR  v_e/v_e,rr  kep]
-  % resid - residuals of the fit
-  % estKepRR - estimated kepRR value
-  % stdKepRR - std.Deviation of estimated kepRR value
-  % p - pkParams from the initial LRRM fit
+    % Constrained Linear Reference Region Model
+  	% Reference: Ahmed & Levesque. (2016), MRM, http://doi.org/10.1002/mrm.26530
+  	% Input:
+  	%		Ct = cocentration-time data. Matrix of dimensions nT-by-N, where N is #voxels.
+  	%   Crr = concentration-time curve of reference region. Vector of length nT.
+    %		t = time points of DCE acquisition. Vector of length nT.
+    %   kepRef = Estimated value for the reference region kep value
+    %            If kepRef > 0, then this value will be used as kepRef
+    %                      = 0, then median of positive values will be used as kepRef
+    %                      = -1, then mean will be used
+    %                      = -2, then interquartile mean will be used as kepRef
+    % Output:
+  	%		pkParams = Fitted parameters. 3-by-N matrix, where N is number of voxels.
+    %              The 3 elements of pkParams are: [relativeKTrans, relativeVe, kep]
+  	%   resid = Norm of residuals for each voxel. Vector of length N.
+    %   estKepRR = estimated value for kepRR (aka kepRef)
+    %              if kepRef > 0, then estKepRR = kepRef
+    %              otherwise, estKepRR is the value estimated kepRef from LRRM
+    %   stdKepRR = std deviation of estimate kepRR values
+    %              if kepRef > 0, then stdKepRR = nan
+    %              otherwise, stdKepRR is spread of estimated kepRef from LRRM
+    %   p = Estimated parameters from LRRM, if LRRM fit was done to estimate kepRef. Otherwise, p=nan.
+
 
     % Use interquartile mean by default
     if nargin<4
-        kepRef = -1;
+        kepRef = 0;
     end
-%%
+
     if kepRef <=0
-        % Do first run of LRRM
+        % If kepRef is not known, then estimate it from the LRRM
         p = LRRM(Ct,Crr,t,1);
-        if kepRef == 0
-            % Using the mean of positive values
-            p1 = p(:,1); % First fitted parameter
-            p2 = p(:,2); % Second fitted parameter
-            goodVals = (p1>0) & (p2>0) & p(:,3)>0; % Good values are when all parameters are positive
-            kepRRs = p2(goodVals)./p1(goodVals); % Get kepRR, which is ratio of p2/p1
-            estKepRR = mean(kepRRs);
-            stdKepRR = std(kepRRs);
-        elseif kepRef == -1
-            % Using the interquartile mean
-            p1 = p(:,1);
-            p2 = p(:,2);
-            goodVals = (p1>0) & (p2>0) & p(:,3)>0;
-            kepRRs = p2(goodVals)./p1(goodVals);
-            qtRange = quantile(kepRRs,[.25 .75]); % Get the 25th and 75th quantile
-            xMask = kepRRs>qtRange(1) & kepRRs<qtRange(2);
-            estKepRR = mean(kepRRs(xMask)); % Take mean of values within the 25th and 75th quantiles
-            stdKepRR = std(kepRRs(xMask));
+        p1 = p(:,1); % First fitted parameter from LRRM
+        p2 = p(:,2); % Second fitted parameter from LRRM
+        goodVals = (p1>0) & (p2>0) & p(:,3)>0; % Good values are when all parameters are positive
+        % Get kepRR, which is ratio of p2/p1, for voxels where all fitted parameters are positive
+        x= p2(goodVals)./p1(goodVals);
+        % Use either the mean, interquartile mean, or median (default) to obtain a single value for kepRR
+        if kepRef == -1
+            % Using the mean estimated kepRR from LRRM
+            estKepRR = mean(x);
+            stdKepRR = std(x);
+        elseif kepRef == -2
+            % Using the interquartile mean of kepRR from LRRM
+            qtRange = quantile(x,[.25 .75]);
+            xMask = x>qtRange(1) & x<qtRange(2);
+            estKepRR = mean(x(xMask));
+            stdKepRR = std(x(xMask));
+        else
+            % Using the median of positive kepRR estimates
+            estKepRR = median(x(x>0));
+            qtRange = quantile(x,[.25 .75]);
+            stdKepRR = (qtRange(2)-qtRange(1))/1.35; % Estimate stdKepR using interquartile range
         end
     else
-        % Otherwise, use the kepRef that is provided with function call
+      % If a positive value of kepRef is provided, then use that as kepRR
         estKepRR = kepRef;
         stdKepRR = nan;
         p = nan;
     end
 
-    stepSize = t(2)-t(1); % Assuming constant step size throughout acquisition
+    % Assuming constant step size throughout acquisition
+    stepSize = t(2)-t(1);
 
     % Initialize matrices
     [sT, sX] = size(Ct);
@@ -67,7 +75,7 @@ function [pkParams, resid, estKepRR, stdKepRR, p] = CLRRM(Ct, Crr, t, kepRef)
     resid = zeros(sX,1);
     pkParams = zeros(sX,2);
 
-    % Solve the linear problem
+    % Do the linear least-squares fit
     % Disabling warnings for speed (possible non-tissue regions in image give warnings)
     warning off
 
@@ -80,10 +88,11 @@ function [pkParams, resid, estKepRR, stdKepRR, p] = CLRRM(Ct, Crr, t, kepRef)
     end
     warning on
 
+    % Modify the CLRRM fit parameters so that they match the LRRM's parameters
     pkParams(:,3)=pkParams(:,2);
     pkParams(:,2)=estKepRR*pkParams(:,1);
 
-    % pkParams = [kTrans_TOI/kTrans_RR, kTrans_TOI/ve_RR, kTrans_TOI/ve_TOI]
-    % desire: pkParams = [kTrans_TOI/ktrans_RR, ve_TOI/ve_RR, kTrans_TOI/ve_TOI]
+    % The fitted values of pkParams are: [kTrans_TOI/kTrans_RR, kTrans_TOI/ve_RR, kTrans_TOI/ve_TOI]
+    % but it'd be more useful if we had: pkParams = [kTrans_TOI/ktrans_RR, ve_TOI/ve_RR, kTrans_TOI/ve_TOI]
     pkParams(:,2) = pkParams(:,2)./pkParams(:,3);
 end

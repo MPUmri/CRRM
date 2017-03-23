@@ -1,24 +1,41 @@
 # This script process the simulation data using non-linear least squares fitting
 # for both the original Reference Region Model (NRRM) and the Constrained approach (CNRRM)
 
+# Run this script by launching julia then entering: include("path/to/e01_2a_simProcessNLSQ.jl")
+
+# Estimated runtimes:
+# ~2.6 hours for NRRM
+# ~1.2 hours for CNRRM
+# So total run time is almost 4 hours
+# Note: These runtimes were obtained using 4 threads.
+#       If only a single core is used, then the runtime could be 4 times longer
+
 # Pick the choice of parameters for the reference tissue parameters
 # (This should match the choice from step e01_1)
 refName = "refY"
 
 # The temporal resolution (in seconds) to process over
-listTRes = [10]
+listTRes = [1,5,10,15,30,60]
 # The choice of Contrast-Noise Ratios
-# (This does not change noise, rather it is only here to remind the code what the CNRs are)
-listCNR = [5]
+# (This does not change noise, rather it is only here to remind the code what the CNRs are. Should match values from simMaker.)
+listCNR = collect(5:5:50)
 
 # First, figure out the current file path
 curFilePath = Base.source_path() # Path to current file
 workDir = dirname(curFilePath) # Our working directory (directory of current file)
-## If the above doesn't work, then user has to manually enter the location of the CLRRM directory
+## If the above doesn't work, then user has to manually enter the location of the CRRM directory
 ## i.e. wordDir = "/path/to/CLRRM/Directory"
 
+import Hwloc
+topology = Hwloc.topology_load()
+counts = Hwloc.histmap(topology)
+nCores = counts[:Core]
+if nprocs()<nCores
+  addprocs(nCores-nprocs()+1)
+end
+
 ## Load packages
-import DCEMRI  # Needed for the levenberg-marquardt fitting
+using DCEMRI  # Needed for the levenberg-marquardt fitting
 using MAT      # Needed for loading/saving .mat files
 
 # Some required directories/files
@@ -29,18 +46,17 @@ refRegCode = workDir * "/jlfiles/refRegionFunction.jl"
 
 outDir = workDir * "/data/simData/$refName/NRRM"
 
+# Make the output directory if it doesn't already exist
 if !(isdir(outDir))
   mkdir(outDir)
 end
-
-# cd(outDir) # unnecessary
 
 # Load pre-requisite code
 include(auxCode)
 
 ## Warmup run to make sure all is well
 println("==== Warmup Run ====")
-results = DCEMRI.fitdata(datafile=warmupFile, models=[2])
+results = fitdata(datafile=warmupFile, models=[2])
 rm("output.mat") # Delete output since it isn't needed
 
 # If warmup succeeds, then proceed by loading Reference Region Model
@@ -68,6 +84,7 @@ println("===============================")
 println("==== Start processing data ====")
 # Loop through the simulated datasets
 for q=1:numFiles
+  # Load the simulated data for each CNR
   curCNR = listCNR[q]
   println("")
   println("------------")
@@ -76,6 +93,7 @@ for q=1:numFiles
   matData = matread(curFile)
   cnrInd = listCNR[q]
   for i=1:length(listTRes)
+    # Appropriately downsample simulated data to obtain desired temporal resolutions
     curTRes = listTRes[i]
     println("")
     println("---")
@@ -86,24 +104,9 @@ for q=1:numFiles
     t = downsample(vec(matData["T"]),curTRes)
     # Build a dummy mask (ones everywhere)
     (nT, nV) = size(Ct)
-    mask = ones(nV) .> 0
     # Non-Linear Reference Region Model
-    tic()
-    pkParamsN, residN = doRRM(Ct, mask, t, Crr, constrain=false)
-    runtimeN = toc()
-    # Build a mask to filter out any voxel where any estimate is negative
-    maskNegative = pkParamsN .<= 0
-    maskNegative = sum(maskNegative,1)
-    maskPositive = vec(maskNegative .== 0)
-    # Apply the mask, and obtain the interquartile mean from the voxel-wise kepRR estimates
-    pkParams = pkParamsN[:,maskPositive]
-    estKepRR = vec(pkParams[4,:])
-    meanKepRR = mean(iqrFilter(estKepRR,[.25, .75], true))
-    # Use the interquartile mean-based kepRR with the Constrained Non-Linear Reference Region Model
-    println("")
-    tic()
-    pkParamsCN, residCN = doRRM(Ct, mask, t, Crr, estKepRR=meanKepRR, constrain=true)
-    runtimeC = toc()
+    # (Unconstrained and Constrained are both run if estKepRR is set to zero)
+    (pkParamsCN, residCN, medianKepRR, pkParamsN, residN, runtimeN, runtimeC) = fitCNRRM(Ct, Crr, t, estKepRR=0.0, doTime=true)
     # Output results
     results = Dict()
     results["pkParamsN"] = pkParamsN
@@ -112,8 +115,7 @@ for q=1:numFiles
     results["residCN"] = residCN
     results["runtimeN"] = runtimeN
     results["runtimeC"] = runtimeC
-    results["meanKepRR"] = meanKepRR
-    results["stdKepRR"] = std(iqrFilter(estKepRR,[.25, .75], true))
+    results["medianKepRR"] = medianKepRR
     matwrite(outDir * "/Sim-CNR-$curCNR-TRes-$curTRes.mat", results)
   end
 end
