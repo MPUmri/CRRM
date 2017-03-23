@@ -91,9 +91,8 @@ e01_3b_collectInformation.m
 Optional:
 e01_x_simAnalyzerStatic.m
   - this script looks at the relationship between error in kepRR and error in CLRRM fit
-
-./analysis/e01_analysis.Rmd
-  - a shiny app for visualizing the results of the simulation
+./analysis/s01_analysisErrKepRR.Rmd
+  - a shiny app for visualizing the results of the previous script
 ```
 
 A summary of the results of the simulation are saved in `./dataResults/e01-simResults-refY.csv`.
